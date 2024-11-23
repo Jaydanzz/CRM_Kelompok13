@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Modern CRM</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.27.1/plotly.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            min-height: 100vh;
+        }
+
+        .sidebar {
+            width: 250px;
+            background: #f8f9fa;
+            padding: 2rem;
+            border-right: 1px solid #dee2e6;
+        }
+
+        .main-content {
+            flex: 1;
+            padding: 2rem;
+            background: #fff;
+        }
+
+        .nav-item {
+            padding: 0.5rem;
+            margin: 0.5rem 0;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+
+        .nav-item:hover {
+            background: #e9ecef;
+        }
+
+        .nav-item.active {
+            background: #ff4b4b;
+            color: white;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .metric-card {
+            background: #fff;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+        }
+
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1rem;
+        }
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+        }
+
+        .btn {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background: #ff4b4b;
+            color: white;
+            width: 100%;
+        }
+
+        .btn:hover {
+            background: #ff3333;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+
+        th, td {
+            padding: 0.75rem;
+            border: 1px solid #dee2e6;
+            text-align: left;
+        }
+
+        .expander {
+            background: #f8f9fa;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border-radius: 4px;
+        }
+
+        .success-message {
+            background: #d4edda;
+            color: #155724;
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 4px;
+        }
+
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <h2>Navigation</h2>
+        <div class="nav-item active" data-page="dashboard">Dashboard</div>
+        <div class="nav-item" data-page="customers">Customers</div>
+        <div class="nav-item" data-page="deals">Deals</div>
+        <div class="nav-item" data-page="activities">Activities</div>
+    </div>
+
+    <div class="main-content" id="app"></div>
+
+    <script>
+        // State management
+        const state = {
+            customers: [],
+            deals: [],
+            activities: [],
+            currentPage: 'dashboard'
+        };
+
+        // Load data from localStorage
+        function loadData() {
+            try {
+                state.customers = JSON.parse(localStorage.getItem('customers')) || [];
+                state.deals = JSON.parse(localStorage.getItem('deals')) || [];
+                state.activities = JSON.parse(localStorage.getItem('activities')) || [];
+            } catch (e) {
+                console.error('Error loading data:', e);
+            }
+        }
+
+        // Save data to localStorage
+        function saveData() {
+            localStorage.setItem('customers', JSON.stringify(state.customers));
+            localStorage.setItem('deals', JSON.stringify(state.deals));
+            localStorage.setItem('activities', JSON.stringify(state.activities));
+        }
+
+        // Dashboard component
+        function renderDashboard() {
+            const totalCustomers = state.customers.length;
+            const totalDealValue = state.deals.reduce((sum, deal) => sum + Number(deal.value), 0);
+            const openDeals = state.deals.filter(deal => deal.status === 'Open').length;
+            const recentActivities = state.activities.filter(activity => {
+                const days = (new Date() - new Date(activity.date)) / (1000 * 60 * 60 * 24);
+                return days <= 7;
+            }).length;
+
+            const app = document.getElementById('app');
+            app.innerHTML = `
+                <h1>📊 Dashboard</h1>
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <h3>Total Customers</h3>
+                        <p>${totalCustomers}</p>
+                    </div>
+                    <div class="metric-card">
+                        <h3>Total Deal Value</h3>
+                        <p>$${totalDealValue.toLocaleString()}</p>
+                    </div>
+                    <div class="metric-card">
+                        <h3>Open Deals</h3>
+                        <p>${openDeals}</p>
+                    </div>
+                    <div class="metric-card">
+                        <h3>Recent Activities</h3>
+                        <p>${recentActivities}</p>
+                    </div>
+                </div>
+                <div class="charts-grid">
+                    <div id="dealsPipeline"></div>
+                    <div id="activitiesTimeline"></div>
+                </div>
+            `;
+
+            renderDealsPipelineChart();
+            renderActivitiesTimelineChart();
+        }
+
+        // Customers component
+        function renderCustomers() {
+            const app = document.getElementById('app');
+            app.innerHTML = `
+                <h1>👥 Customers</h1>
+                <div class="expander">
+                    <h3>Add New Customer</h3>
+                    <form id="customerForm">
+                        <div class="form-group">
+                            <label>Name</label>
+                            <input type="text" class="form-control" id="customerName" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Email</label>
+                            <input type="email" class="form-control" id="customerEmail" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Company</label>
+                            <input type="text" class="form-control" id="customerCompany">
+                        </div>
+                        <div class="form-group">
+                            <label>Phone</label>
+                            <input type="tel" class="form-control" id="customerPhone">
+                        </div>
+                        <button type="submit" class="btn">Add Customer</button>
+                    </form>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Email</th>
+                            <th>Company</th>
+                            <th>Phone</th>
+                            <th>Created Date</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${state.customers.map(customer => `
+                            <tr>
+                                <td>${customer.name}</td>
+                                <td>${customer.email}</td>
+                                <td>${customer.company || '-'}</td>
+                                <td>${customer.phone || '-'}</td>
+                                <td>${customer.created_date}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+
+            document.getElementById('customerForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                const newCustomer = {
+                    id: state.customers.length + 1,
+                    name: document.getElementById('customerName').value,
+                    email: document.getElementById('customerEmail').value,
+                    company: document.getElementById('customerCompany').value,
+                    phone: document.getElementById('customerPhone').value,
+                    created_date: new Date().toISOString().split('T')[0]
+                };
+                state.customers.push(newCustomer);
+                saveData();
+                renderCustomers();
+            });
+        }
+
+        // Deals component
+        function renderDeals() {
+            const app = document.getElementById('app');
+            app.innerHTML = `
+                <h1>💰 Deals</h1>
+                <div class="expander">
+                    <h3>Add New Deal</h3>
+                    <form id="dealForm">
+                        <div class="form-group">
+                            <label>Deal Title</label>
+                            <input type="text" class="form-control" id="dealTitle" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Customer</label>
+                            <select class="form-control" id="dealCustomer" required>
+                                ${state.customers.map(customer => `
+                                    <option value="${customer.name}">${customer.name}</option>
+                                `).join('')}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Value ($)</label>
+                            <input type="number" class="form-control" id="dealValue" min="0" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Status</label>
+                            <select class="form-control" id="dealStatus">
+                                <option value="Open">Open</option>
+                                <option value="Won">Won</option>
+                                <option value="Lost">Lost</option>
+                                <option value="On Hold">On Hold</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="btn">Add Deal</button>
+                    </form>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Title</th>
+                            <th>Customer</th>
+                            <th>Value</th>
+                            <th>Status</th>
+                            <th>Created Date</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${state.deals.map(deal => `
+                            <tr>
+                                <td>${deal.title}</td>
+                                <td>${deal.customer}</td>
+                                <td>$${Number(deal.value).toLocaleString()}</td>
+                                <td>${deal.status}</td>
+                                <td>${deal.created_date}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+
+            document.getElementById('dealForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                const newDeal = {
+                    id: state.deals.length + 1,
+                    title: document.getElementById('dealTitle').value,
+                    customer: document.getElementById('dealCustomer').value,
+                    value: document.getElementById('dealValue').value,
+                    status: document.getElementById('dealStatus').value,
+                    created_date: new Date().toISOString().split('T')[0]
+                };
+                state.deals.push(newDeal);
+                saveData();
+                renderDeals();
+            });
+        }
+
+        // Activities component
+        function renderActivities() {
+            const app = document.getElementById('app');
+            app.innerHTML = `
+                <h1>📅 Activities</h1>
+                <div class="expander">
+                    <h3>Add New Activity</h3>
+                    <form id="activityForm">
+                        <div class="form-group">
+                            <label>Activity Type</label>
+                            <select class="form-control" id="activityType">
+                                <option value="Call">Call</option>
+                                <option value="Meeting">Meeting</option>
+                                <option value="Email">Email</option>
+                                <option value="Task">Task</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Customer</label>
+                            <select class="form-control" id="activityCustomer" required>
+                                ${state.customers.map(customer => `
+                                    <option value="${customer.name}">${customer.name}</option>
+                                `).join('')}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Notes</label>
+                            <textarea class="form-control" id="activityNotes" required></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Date</label>
+                            <input type="date" class="form-control" id="activityDate" required>
+                        </div>
+                        <button type="submit" class="btn">Add Activity</button>
+                    </form>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>Customer</th>
+                            <th>Notes</th>
+                            <th>Date</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${state.activities.map(activity => `
+                            <tr>
+                                <td>${activity.type}</td>
+                                <td>${activity.customer}</td>
+                                <td>${activity.notes}</td>
+                                <td>${activity.date}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+
+            document.getElementById('activityForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                const newActivity = {
+                    id: state.activities.length + 1,
+                    type: document.getElementById('activityType').value,
+                    customer: document.getElementById('activityCustomer').value,
+                    notes: document.getElementById('activityNotes').value,
+                    date: document.getElementById('activityDate').value
+                };
+                state.activities.push(newActivity);
+                saveData();
+                renderActivities();
+            });
+        }
+
+        // Charts rendering
+        function renderDealsPipelineChart() {
+            const dealsByStatus = {};
+            state.deals.forEach(deal => {
+                dealsByStatus[deal.status] = (dealsByStatus[deal.status] || 0) + Number(deal.value);
+            });
+
+            const data = [{
+                x: Object.keys(dealsByStatus),
+                y: Object.values(dealsByStatus),
+                type: 'bar'
+            }];
+
+            const layout = {
+                title: 'Deal Pipeline',
+                height: 400
+            };
+
+            Plotly.newPlot('dealsPipeline', data, layout);
+        }
+        function renderActivitiesTimelineChart() {
+            const data = [{
+                x: state.activities.map(a => a.date),
+                y: state.activities.map(a => a.type),
+                mode: 'markers',
+                type: 'scatter'
+            }];
+
+            const layout = {
+                title: 'Activity Timeline',
+                height: 400,
+                xaxis: {
+                    title: 'Date'
+                },
+                yaxis: {
+                    title: 'Activity Type'
+                }
+            };
+
+            Plotly.newPlot('activitiesTimeline', data, layout);
+        }
+
+        // Navigation handling
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', () => {
+                document.querySelector('.nav-item.active').classList.remove('active');
+                item.classList.add('active');
+                state.currentPage = item.dataset.page;
+                renderPage();
+            });
+        });
+
+        // Page renderer
+        function renderPage() {
+            switch(state.currentPage) {
+                case 'dashboard':
+                    renderDashboard();
+                    break;
+                case 'customers':
+                    renderCustomers();
+                    break;
+                case 'deals':
+                    renderDeals();
+                    break;
+                case 'activities':
+                    renderActivities();
+                    break;
+            }
+        }
+
+        // Initial load
+        loadData();
+        renderPage();
+    </script>
+</body>
+</html>
